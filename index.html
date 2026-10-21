@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Naruto Run - Hidden Leaf Village</title>
+<style>
+  body { margin:0; background:#000; display:flex; justify-content:center; align-items:center; height:100vh; overflow:hidden;
+         touch-action:none; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; }
+  canvas { background:#6ec3ff; width:min(100vw, calc(100vh * 1000 / 520)); height:auto; }
+  #pad { position:fixed; left:0; right:0; bottom:10px; display:none; justify-content:space-between;
+         align-items:flex-end; padding:0 14px; pointer-events:none; }
+  #pad .grp { display:flex; gap:10px; align-items:flex-end; }
+  #pad button { pointer-events:auto; border:3px solid rgba(255,255,255,0.8); border-radius:50%;
+         background:rgba(0,0,0,0.35); color:#fff; font:bold 13px Arial; width:74px; height:74px; }
+  #pad button:active { background:rgba(255,140,0,0.7); }
+  #pad #bJump { width:96px; height:96px; font-size:16px; background:rgba(255,140,0,0.45); }
+  @media (pointer:coarse) { #pad { display:flex; } }
+</style>
+</head>
+<body>
+<canvas id="g" width="1000" height="520"></canvas>
+<div id="pad">
+  <div class="grp"><button id="bDuck">DUCK</button></div>
+  <div class="grp">
+    <button id="bRas">RASEN<br>GAN</button>
+    <button id="bShu">SHURI<br>KEN</button>
+    <button id="bJump">JUMP</button>
+  </div>
+</div>
+<script>
+const cv = document.getElementById('g'), ctx = cv.getContext('2d');
+const W = 1000, H = 520, GROUND = 430;
+const GRAVITY = 2400, JUMP_V = -900, START_SPEED = 320, MAX_SPEED = 750;
+
+// ---- easy settings ----
+const CHAKRA_MAX = 100;
+const CHAKRA_PER_RAMEN = 50;
+const RASENGAN_COST = 50;
+const SHURIKEN_COST = 100;
+const SHURIKEN_DAMAGE = 4;
+const FIRE_FACES_RIGHT = true;   // set false if your fire.png faces left
+const FIRE_SPEED = 650;
+
+function load(src) { const i = new Image(); i.ok = false; i.onload = () => i.ok = true; i.src = src; return i; }
+const bg = load('background.png'), naruto = load('naruto.png'), duck = load('naruto_duck.png'),
+      obs1 = load('obstacle1.png'), obs2 = load('obstacle2.png'), fly = load('flyer.png'),
+      ramen = load('ramen.png'), rasen = load('rasengan.png'), shuri = load('rasenshuriken.png'),
+      bossImg = load('boss.png'), foxImg = load('fox.png'), fireImg = load('fire.png');
+
+function drawImg(im, x, y, w, h, col) {
+  if (im.ok) ctx.drawImage(im, x, y, w, h);
+  else { ctx.fillStyle = col; ctx.fillRect(x, y, w, h); }
+}
+function drawBall(im, x, y, r, col) {
+  if (im.ok) ctx.drawImage(im, x - r, y - r, r * 2, r * 2);
+  else { ctx.fillStyle = col; ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill(); }
+}
+function drawShuriken(s, now) {
+  ctx.save();
+  ctx.translate(s.x, s.y);
+  ctx.rotate(now / 60);
+  if (shuri.ok) {
+    ctx.drawImage(shuri, -s.r * 1.6, -s.r * 1.6, s.r * 3.2, s.r * 3.2);
+  } else {
+    ctx.fillStyle = 'rgba(120,200,255,0.35)';
+    ctx.beginPath(); ctx.arc(0, 0, s.r * 1.4, 0, 7); ctx.fill();
+    ctx.fillStyle = '#e8f6ff';
+    for (let k = 0; k < 4; k++) {
+      ctx.beginPath();
+      ctx.moveTo(-s.r * 0.35, 0); ctx.lineTo(0, -s.r * 1.6); ctx.lineTo(s.r * 0.35, 0);
+      ctx.fill();
+      ctx.rotate(Math.PI / 2);
+    }
+    ctx.fillStyle = '#4da6ff';
+    ctx.beginPath(); ctx.arc(0, 0, s.r * 0.7, 0, 7); ctx.fill();
+  }
+  ctx.restore();
+}
+function drawFire(b) {
+  if (fireImg.ok) {
+    if (FIRE_FACES_RIGHT) {
+      ctx.save(); ctx.translate(b.x + b.w, b.y); ctx.scale(-1, 1);
+      ctx.drawImage(fireImg, 0, 0, b.w, b.h); ctx.restore();
+    } else ctx.drawImage(fireImg, b.x, b.y, b.w, b.h);
+  } else {
+    ctx.fillStyle = '#ff4500'; ctx.beginPath(); ctx.ellipse(b.x + b.w / 2, b.y + b.h / 2, b.w / 2, b.h / 2, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = '#ffd24d'; ctx.beginPath(); ctx.ellipse(b.x + b.w / 2 - 6, b.y + b.h / 2, b.w / 3, b.h / 3, 0, 0, 7); ctx.fill();
+  }
+}
+function hitbox(x, y, w, h, m = 0.18) { return { x: x + w*m, y: y + h*m, w: w*(1-2*m), h: h*(1-2*m) }; }
+function hit(a, b) { return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y; }
+
+// ---------- Sound effects ----------
+let audio;
+function beep(freq, dur, type = 'square', vol = 0.05) {
+  try {
+    audio = audio || new AudioContext();
+    const o = audio.createOscillator(), g = audio.createGain();
+    o.type = type; o.frequency.value = freq; g.gain.value = vol;
+    o.connect(g); g.connect(audio.destination);
+    o.start(); o.stop(audio.currentTime + dur);
+  } catch (e) {}
+}
+
+// ---------- Audio: music + evil laugh ----------
+function makeAudio(src, loop, vol) {
+  const a = new Audio();
+  a.preload = 'auto'; a.loop = loop; a.volume = vol;
+  a.src = src;
+  return a;
+}
+const themeMusic = makeAudio('theme.mp3', true, 0.5);
+const bossMusic  = makeAudio('boss_music.mp3', true, 0.6);
+const laughAudio = makeAudio('laugh.mp3', false, 1);
+
+function synthLaugh() {
+  try {
+    audio = audio || new AudioContext();
+    if (audio.state === 'suspended') audio.resume();
+    const t0 = audio.currentTime + 0.05;
+    for (let k = 0; k < 4; k++) {
+      const t = t0 + k * 0.28;
+      const o = audio.createOscillator(), g = audio.createGain();
+      o.type = 'sawtooth';
+      o.frequency.setValueAtTime(190 - k * 18, t);
+      o.frequency.exponentialRampToValueAtTime(95 - k * 8, t + 0.22);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.12, t + 0.03);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.24);
+      o.connect(g); g.connect(audio.destination);
+      o.start(t); o.stop(t + 0.26);
+    }
+  } catch (e) {}
+}
+function evilLaugh() {
+  if (!laughAudio.error) {
+    laughAudio.currentTime = 0;
+    const p = laughAudio.play();
+    if (p) p.catch(synthLaugh);
+  } else synthLaugh();
+}
+
+let musicTry = 0;
+function updateMusic() {
+  let want = null;
+  if (started && !paused && !dead) {
+    want = boss ? (bossMsg > 0.8 ? null : bossMusic) : themeMusic;
+  }
+  if (dead && themeMusic.currentTime > 0) themeMusic.currentTime = 0;
+  for (const m of [themeMusic, bossMusic]) if (m !== want && !m.paused) m.pause();
+  if (want && want.paused && !want.error && performance.now() > musicTry) {
+    musicTry = performance.now() + 500;
+    want.play().catch(() => {});
+  }
+}
+
+const PX = 110, STAND_W = 70, STAND_H = 95, DUCK_W = 95, DUCK_H = 55;
+let feetY, vy, speed, score, spawn, ramenSpawn, foxSpawn, bgOffset, dead, ducking;
+let obs, items, shots, bshots, parts, boss, nextBoss, shield, bossCount;
+let jumps, chakra, shake, wasAir, level, levelMsg, bossMsg;
+let started = false, paused = false;
+let hi = 0;
+try { hi = parseInt(localStorage.getItem('narutoHi')) || 0; } catch (e) {}
+
+function reset() {
+  feetY = GROUND; vy = 0; speed = START_SPEED; score = 0; spawn = 1.0; ramenSpawn = 2; foxSpawn = 15;
+  bgOffset = 0; dead = false; ducking = false;
+  obs = []; items = []; shots = []; bshots = []; parts = [];
+  boss = null; nextBoss = 500; shield = 0; bossCount = 0;
+  jumps = 0; chakra = 0; shake = 0; wasAir = false; level = 1; levelMsg = 0; bossMsg = 0;
+}
+reset();
+
+function burst(x, y, col, n = 12) {
+  for (let i = 0; i < n; i++)
+    parts.push({ x, y, vx: (Math.random() - 0.5) * 400, vy: (Math.random() - 0.8) * 400, life: 0.5, col });
+}
+function die() {
+  dead = true; shake = 0.5; beep(150, 0.4, 'sawtooth', 0.08);
+  if (Math.floor(score) > hi) {
+    hi = Math.floor(score);
+    try { localStorage.setItem('narutoHi', hi); } catch (e) {}
+  }
+}
+function jump() {
+  if (dead || jumps >= 2) return;
+  vy = JUMP_V; jumps++; beep(jumps === 1 ? 500 : 700, 0.12);
+}
+function rasengan() {
+  if (dead || chakra < RASENGAN_COST) return;
+  chakra -= RASENGAN_COST;
+  shots.push({ type: 'ras', x: PX + 60, y: feetY - 55, r: 22, dmg: 1 });
+  beep(300, 0.25, 'sawtooth', 0.06);
+}
+function rasenshuriken() {
+  if (dead || chakra < SHURIKEN_COST) return;
+  chakra -= SHURIKEN_COST;
+  shots.push({ type: 'shu', x: PX + 60, y: feetY - 70, r: 75, dmg: SHURIKEN_DAMAGE });
+  shake = 0.2;
+  beep(120, 0.4, 'sawtooth', 0.09); beep(500, 0.3, 'triangle', 0.06);
+}
+function pressStart() {
+  if (!started) { started = true; return; }
+  if (dead) reset(); else if (!paused) jump();
+}
+function fireShot(x, high) {
+  bshots.push(high ? { x, y: GROUND - 100, w: 80, h: 45 }
+                   : { x, y: GROUND - 48,  w: 80, h: 48 });
+}
+
+// ---------- Controls ----------
+const keys = {};
+window.addEventListener('keydown', e => {
+  if (['Space', 'ArrowUp', 'ArrowDown'].includes(e.code)) e.preventDefault();
+  if (e.code === 'KeyF') {
+    if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+    else document.exitFullscreen();
+    return;
+  }
+  if (e.repeat) return;
+  keys[e.code] = true;
+  if (e.code === 'KeyP' && started && !dead) paused = !paused;
+  if (e.code === 'Space' || e.code === 'ArrowUp') pressStart();
+  if (e.code === 'KeyX' || e.code === 'KeyZ') { if (started && !paused) rasengan(); }
+  if (e.code === 'KeyC' || e.code === 'KeyV') { if (started && !paused) rasenshuriken(); }
+  if ((e.code === 'Enter' || e.code === 'KeyR') && dead) reset();
+});
+window.addEventListener('keyup', e => keys[e.code] = false);
+cv.addEventListener('mousedown', pressStart);
+
+// ---------- Touch controls ----------
+function bindBtn(id, down, up) {
+  const b = document.getElementById(id);
+  b.addEventListener('touchstart', e => { e.preventDefault(); down(); }, { passive: false });
+  if (up) {
+    b.addEventListener('touchend',    e => { e.preventDefault(); up(); }, { passive: false });
+    b.addEventListener('touchcancel', up);
+  }
+}
+bindBtn('bJump', pressStart);
+bindBtn('bDuck', () => keys['ArrowDown'] = true, () => keys['ArrowDown'] = false);
+bindBtn('bRas',  () => { if (started && !paused) rasengan(); });
+bindBtn('bShu',  () => { if (started && !paused) rasenshuriken(); });
+document.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
+
+let last = performance.now();
+function loop(now) {
+  let dt = (now - last) / 1000; last = now;
+  if (dt > 0.05) dt = 0.05;
+
+  if (started && !paused && !dead) {
+    const onGround = feetY >= GROUND;
+    const downHeld = !!keys['ArrowDown'];
+    ducking = downHeld && onGround;
+
+    vy += GRAVITY * (downHeld && !onGround ? 2 : 1) * dt;
+    feetY += vy * dt;
+    if (feetY >= GROUND) {
+      feetY = GROUND; vy = 0; jumps = 0;
+      if (wasAir) burst(PX + 35, GROUND, '#c9a66b', 8);
+      wasAir = false;
+    } else wasAir = true;
+
+    speed = Math.min(MAX_SPEED, speed + 4 * dt);
+    score += speed * dt / 10;
+    bgOffset = (bgOffset + speed * 0.25 * dt) % (2 * W);
+    if (shield > 0) shield -= dt;
+
+    const newLevel = 1 + Math.floor(score / 200);
+    if (newLevel > level) { level = newLevel; levelMsg = 1.5; beep(880, 0.2, 'triangle'); }
+    if (levelMsg > 0) levelMsg -= dt;
+    if (bossMsg > 0) bossMsg -= dt;
+
+    if (onGround && Math.random() < 0.3) parts.push({ x: PX, y: GROUND - 3, vx: -speed * 0.3, vy: -60, life: 0.3, col: '#c9a66b' });
+
+    // start boss (stronger every time)
+    if (!boss && score >= nextBoss) {
+      const hp = 6 + bossCount * 2;
+      boss = { x: W + 150, y: GROUND - 170, w: 140, h: 170, hp, maxHp: hp, shotTimer: 1.5, timer: 40, flash: 0 };
+      bossMsg = 2; evilLaugh();
+    }
+
+    // obstacles (paused while boss is here)
+    if (!boss) {
+      spawn -= dt;
+      if (spawn <= 0) {
+        let type = Math.floor(Math.random() * 4);
+        if (score < 150 && type >= 2) type = Math.floor(Math.random() * 2);
+        let o = { x: W + 20, type };
+        if (type === 0)      { o.w = 65;  o.h = 95; o.y = GROUND - o.h; }
+        else if (type === 1) { o.w = 105; o.h = 75; o.y = GROUND - o.h; }
+        else                 { o.w = 85;  o.h = 58; o.y = GROUND - 55 - o.h; }
+        obs.push(o);
+        spawn = Math.max(1.0, 1.4 + Math.random() * 1.2 - level * 0.03);
+      }
+    }
+
+    // ramen and fox orb
+    ramenSpawn -= dt;
+    if (ramenSpawn <= 0) {
+      items.push({ type: 'ramen', x: W + 20, y: GROUND - (Math.random() < 0.5 ? 40 : 150), r: 20 });
+      ramenSpawn = boss ? 1.0 + Math.random() * 0.8 : 2 + Math.random() * 2;
+    }
+    foxSpawn -= dt;
+    if (foxSpawn <= 0 && !boss) {
+      items.push({ type: 'fox', x: W + 20, y: GROUND - 120, r: 26 });
+      foxSpawn = 14 + Math.random() * 8;
+    }
+
+    const pw = ducking ? DUCK_W : STAND_W, ph = ducking ? DUCK_H : STAND_H;
+    const pBox = hitbox(PX, feetY - ph, pw, ph);
+
+    for (let i = obs.length - 1; i >= 0; i--) {
+      obs[i].x -= speed * dt;
+      if (obs[i].x + obs[i].w < 0) { obs.splice(i, 1); continue; }
+      if (hit(pBox, hitbox(obs[i].x, obs[i].y, obs[i].w, obs[i].h))) {
+        if (shield > 0) {
+          burst(obs[i].x + obs[i].w / 2, obs[i].y + obs[i].h / 2, '#ff8c00', 16);
+          obs.splice(i, 1); score += 10; beep(250, 0.15, 'sawtooth');
+        } else die();
+      }
+    }
+
+    for (let i = items.length - 1; i >= 0; i--) {
+      const it = items[i];
+      it.x -= speed * dt;
+      if (it.x < -40) { items.splice(i, 1); continue; }
+      if (hit(pBox, { x: it.x - it.r, y: it.y - it.r, w: it.r * 2, h: it.r * 2 })) {
+        items.splice(i, 1);
+        if (it.type === 'fox') { shield = 6; burst(it.x, it.y, '#ff8c00', 24); beep(600, 0.3, 'triangle'); }
+        else { score += 20; chakra = Math.min(CHAKRA_MAX, chakra + CHAKRA_PER_RAMEN); burst(it.x, it.y, '#ffd24d'); beep(900, 0.1, 'triangle'); }
+      }
+    }
+
+    // boss logic
+    if (boss) {
+      if (boss.x > 760) boss.x -= 250 * dt;
+      else {
+        boss.timer -= dt;
+        boss.shotTimer -= dt;
+        if (boss.shotTimer <= 0) {
+          const high = Math.random() < 0.5;
+          fireShot(boss.x, high);
+          if (Math.random() < 0.3) fireShot(boss.x + 170, high);
+          boss.shotTimer = Math.max(0.7, 1.4 - bossCount * 0.1) + Math.random() * 0.6;
+          beep(400, 0.1, 'square');
+        }
+      }
+      if (boss.flash > 0) boss.flash -= dt;
+      if (boss.timer <= 0) {
+        score += 100; nextBoss += 800; bossCount++; bossMsg = 0; boss = null; bshots = [];
+        beep(800, 0.3, 'triangle');
+      }
+    }
+
+    // boss fire
+    for (let i = bshots.length - 1; i >= 0; i--) {
+      const b = bshots[i];
+      b.x -= FIRE_SPEED * dt;
+      if (b.x + b.w < 0) { bshots.splice(i, 1); continue; }
+      if (hit(pBox, hitbox(b.x, b.y, b.w, b.h, 0.2))) {
+        if (shield > 0) { burst(b.x, b.y, '#ff8c00'); bshots.splice(i, 1); score += 10; }
+        else die();
+      }
+    }
+
+    // hero shots
+    for (let i = shots.length - 1; i >= 0; i--) {
+      const s = shots[i];
+      const isShu = s.type === 'shu';
+      s.x += (isShu ? 1100 : 900) * dt;
+      if (s.x > W + 150) { shots.splice(i, 1); continue; }
+      const hr = isShu ? s.r * 1.3 : s.r;
+      const sBox = { x: s.x - hr, y: s.y - hr, w: hr * 2, h: hr * 2 };
+      let used = false;
+
+      if (boss && hit(sBox, boss)) {
+        boss.hp -= s.dmg; boss.flash = 0.25; shake = isShu ? 0.4 : 0.25; used = true;
+        burst(s.x, s.y, isShu ? '#e8f6ff' : '#4da6ff', isShu ? 40 : 20);
+        beep(isShu ? 100 : 180, 0.3, 'sawtooth', isShu ? 0.09 : 0.05);
+        if (boss.hp <= 0) {
+          burst(boss.x + boss.w / 2, boss.y + boss.h / 2, '#ff8c00', 60);
+          score += 200; chakra = CHAKRA_MAX; nextBoss += 800; bossCount++; boss = null; bshots = []; bossMsg = 0;
+          beep(900, 0.5, 'triangle');
+        }
+      }
+
+      if (!used && isShu) {
+        for (let j = bshots.length - 1; j >= 0; j--) {
+          if (hit(sBox, bshots[j])) { burst(bshots[j].x, bshots[j].y, '#e8f6ff', 10); bshots.splice(j, 1); score += 10; }
+        }
+      }
+
+      if (!used) {
+        for (let j = obs.length - 1; j >= 0; j--) {
+          if (hit(sBox, obs[j])) {
+            burst(obs[j].x + obs[j].w / 2, obs[j].y + obs[j].h / 2, isShu ? '#e8f6ff' : '#4da6ff', 18);
+            obs.splice(j, 1); score += 30; beep(200, 0.2, 'sawtooth');
+            if (!isShu) { used = true; break; }
+          }
+        }
+      }
+      if (used) shots.splice(i, 1);
+    }
+  }
+
+  updateMusic();
+
+  // particles + shake
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const p = parts[i];
+    p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 900 * dt; p.life -= dt;
+    if (p.life <= 0) parts.splice(i, 1);
+  }
+  if (shake > 0) shake -= dt;
+
+  // ---------- Draw ----------
+  ctx.save();
+  if (shake > 0) ctx.translate((Math.random() - 0.5) * 20, (Math.random() - 0.5) * 20);
+  ctx.clearRect(-20, -20, W + 40, H + 40);
+
+  if (bg.ok) {
+    for (let k = 0; k < 3; k++) {
+      const x = -bgOffset + k * W;
+      if (k % 2 === 0) ctx.drawImage(bg, x, 0, W, H);
+      else { ctx.save(); ctx.translate(x + W, 0); ctx.scale(-1, 1); ctx.drawImage(bg, 0, 0, W, H); ctx.restore(); }
+    }
+  }
+  ctx.fillStyle = 'rgba(255,110,0,' + Math.min(0.4, (level - 1) * 0.07) + ')';
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.fillStyle = '#8b5e34'; ctx.fillRect(0, GROUND, W, H - GROUND);
+  ctx.fillStyle = '#3cb44b'; ctx.fillRect(0, GROUND, W, 10);
+
+  for (const o of obs) {
+    if (o.type === 0)      drawImg(obs1, o.x, o.y, o.w, o.h, '#c82828');
+    else if (o.type === 1) drawImg(obs2, o.x, o.y, o.w, o.h, '#289650');
+    else                   drawImg(fly,  o.x, o.y, o.w, o.h, '#963cc8');
+  }
+  for (const it of items) {
+    if (it.type === 'fox') drawBall(foxImg, it.x, it.y, it.r, '#ff6a00');
+    else drawBall(ramen, it.x, it.y, it.r, '#ffd24d');
+  }
+  for (const s of shots) {
+    if (s.type === 'shu') drawShuriken(s, now);
+    else drawBall(rasen, s.x, s.y, s.r, '#4da6ff');
+  }
+
+  if (boss) {
+    if (boss.flash > 0) ctx.globalAlpha = 0.5;
+    drawImg(bossImg, boss.x, boss.y, boss.w, boss.h, '#5a2d82');
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(boss.x, boss.y - 18, boss.w, 10);
+    ctx.fillStyle = '#e03030'; ctx.fillRect(boss.x + 1, boss.y - 17, Math.max(0, (boss.w - 2) * boss.hp / boss.maxHp), 8);
+  }
+  for (const b of bshots) drawFire(b);
+
+  const onG = feetY >= GROUND;
+  const bob = (onG && !ducking && !dead) ? -Math.abs(Math.sin(now / 90)) * 6 : 0;
+  if (shield > 0) {
+    ctx.fillStyle = 'rgba(255,140,0,' + (0.25 + 0.15 * Math.sin(now / 80)) + ')';
+    ctx.beginPath(); ctx.arc(PX + 35, feetY - 48, 70, 0, 7); ctx.fill();
+  }
+  if (ducking) drawImg(duck.ok ? duck : naruto, PX, feetY - DUCK_H, DUCK_W, DUCK_H, '#e66e00');
+  else         drawImg(naruto, PX, feetY - STAND_H + bob, STAND_W, STAND_H, '#ff8c00');
+
+  for (const p of parts) { ctx.globalAlpha = Math.max(0, p.life * 2); ctx.fillStyle = p.col; ctx.fillRect(p.x, p.y, 5, 5); }
+  ctx.globalAlpha = 1;
+
+  // HUD
+  ctx.lineWidth = 4; ctx.strokeStyle = '#000'; ctx.fillStyle = '#fff';
+  ctx.font = 'bold 28px Arial'; ctx.textAlign = 'right';
+  const sc = 'SCORE ' + Math.floor(score) + '    HI ' + hi;
+  ctx.strokeText(sc, W - 20, 40); ctx.fillText(sc, W - 20, 40);
+  ctx.textAlign = 'left'; ctx.font = 'bold 22px Arial';
+  ctx.strokeText('LEVEL ' + level, 20, 35); ctx.fillText('LEVEL ' + level, 20, 35);
+
+  ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(20, 50, 204, 20);
+  ctx.fillStyle = chakra >= SHURIKEN_COST ? '#e8f6ff' : (chakra >= RASENGAN_COST ? '#4da6ff' : '#2d6ca8');
+  ctx.fillRect(22, 52, chakra * 2, 16);
+  ctx.fillStyle = '#fff'; ctx.fillRect(22 + RASENGAN_COST * 2 - 1, 50, 2, 20);
+  ctx.font = '14px Arial';
+  ctx.fillText('X = Rasengan (' + RASENGAN_COST + ')    C = Rasenshuriken (' + SHURIKEN_COST + ')', 20, 88);
+  if (chakra >= SHURIKEN_COST) {
+    ctx.fillStyle = '#e8f6ff'; ctx.font = 'bold 16px Arial';
+    ctx.fillText('RASENSHURIKEN READY! Press C', 20, 108);
+  }
+  if (shield > 0) {
+    ctx.fillStyle = '#ff8c00'; ctx.font = 'bold 18px Arial';
+    ctx.fillText('NINE-TAILS MODE  ' + shield.toFixed(1) + 's', 20, 132);
+  }
+
+  ctx.textAlign = 'center';
+  if (levelMsg > 0) {
+    ctx.font = 'bold 60px Arial'; ctx.fillStyle = '#ffd24d';
+    ctx.strokeText('LEVEL ' + level + '!', W / 2, 160); ctx.fillText('LEVEL ' + level + '!', W / 2, 160);
+  }
+  if (bossMsg > 0) {
+    ctx.font = 'bold 54px Arial'; ctx.fillStyle = '#ff4040';
+    ctx.strokeText('BOSS FIGHT!', W / 2, 220); ctx.fillText('BOSS FIGHT!', W / 2, 220);
+    ctx.font = '24px Arial'; ctx.fillStyle = '#fff';
+    ctx.strokeText('Jump low fire, duck high fire, use Rasenshuriken (C) for big damage', W / 2, 255);
+    ctx.fillText('Jump low fire, duck high fire, use Rasenshuriken (C) for big damage', W / 2, 255);
+  }
+  if (!started) {
+    ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(0, 0, W, H);
+    ctx.font = 'bold 72px Arial'; ctx.fillStyle = '#ff8c00';
+    ctx.strokeText('NARUTO RUN', W / 2, 190); ctx.fillText('NARUTO RUN', W / 2, 190);
+    ctx.font = '30px Arial'; ctx.fillStyle = '#fff';
+    ctx.fillText('Press SPACE to start', W / 2, 260);
+    ctx.font = '20px Arial';
+    ctx.fillText('Space/Up = jump (twice = double jump)   Down = duck   P = pause   F = fullscreen', W / 2, 310);
+    ctx.fillText('X = Rasengan   C = Rasenshuriken (big damage, pierces everything)', W / 2, 340);
+    ctx.fillStyle = '#ffd24d'; ctx.font = '16px Arial';
+    ctx.fillText('theme.mp3: ' + (themeMusic.error ? 'NOT FOUND' : 'ok') +
+                 '   boss_music.mp3: ' + (bossMusic.error ? 'NOT FOUND' : 'ok') +
+                 '   laugh.mp3: ' + (laughAudio.error ? 'NOT FOUND (using built-in laugh)' : 'ok'), W / 2, 380);
+  } else if (paused) {
+    ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(0, 0, W, H);
+    ctx.font = 'bold 70px Arial'; ctx.fillStyle = '#fff';
+    ctx.fillText('PAUSED', W / 2, 250);
+  } else if (dead) {
+    ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(0, 0, W, H);
+    ctx.font = 'bold 70px Arial'; ctx.fillStyle = '#ff8c00';
+    ctx.strokeText('GAME OVER', W / 2, 230); ctx.fillText('GAME OVER', W / 2, 230);
+    ctx.font = '32px Arial'; ctx.fillStyle = '#fff';
+    ctx.fillText('Press SPACE to play again', W / 2, 300);
+  }
+  ctx.restore();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

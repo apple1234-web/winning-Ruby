@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Happy Birthday Rubaiya</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@1,500;1,700&family=Nunito:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg1:#4a0010; --bg2:#c4122f; --rose:#ffc2d1; --gold:#ffe3b3; --text:#fff4f0;
+  }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; }
+  body {
+    background: radial-gradient(ellipse at 30% 20%, var(--bg2), var(--bg1) 70%);
+    color:var(--text); font-family:'Nunito', system-ui, sans-serif;
+    overflow-x:hidden; text-align:center;
+  }
+  canvas#fx { position:fixed; inset:0; width:100%; height:100%; pointer-events:none; z-index:0; }
+
+  /* start screen (needed so the browser lets music play) */
+  #start {
+    position:fixed; inset:0; z-index:10; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; gap:22px;
+    background: radial-gradient(ellipse at center, var(--bg2), var(--bg1));
+    transition:opacity .9s;
+  }
+  #start h1 { font:italic 700 clamp(34px,8vw,64px)/1.1 'Playfair Display',serif; margin:0; color:var(--gold); }
+  #start p { margin:0; opacity:.85; }
+  #start button {
+    font:600 18px 'Nunito',sans-serif; color:#3a0b27; background:var(--gold);
+    border:0; border-radius:40px; padding:14px 34px; cursor:pointer;
+    box-shadow:0 0 0 0 rgba(255,217,160,.6); animation:pulse 1.8s infinite;
+  }
+  @keyframes pulse { 70% { box-shadow:0 0 0 18px rgba(255,217,160,0); } 100% { box-shadow:0 0 0 0 rgba(255,217,160,0); } }
+  #start button:focus-visible { outline:3px solid #fff; outline-offset:3px; }
+
+  main { position:relative; z-index:1; max-width:620px; margin:0 auto; padding:40px 20px 80px; min-height:100%; }
+  #title { font:italic 700 clamp(36px,9vw,70px)/1.1 'Playfair Display',serif; color:var(--gold); margin:10px 0 28px; opacity:0; transition:opacity 1.5s; }
+  #title.on { opacity:1; }
+
+  .frame {
+    width:min(78vw,340px); aspect-ratio:3/4; margin:0 auto 34px; padding:10px; background:#fff4f0;
+    border-radius:6px; transform:rotate(-2.5deg); box-shadow:0 20px 50px rgba(0,0,0,.5);
+    opacity:0; transition:opacity 1.6s, transform 1.6s;
+  }
+  .frame.on { opacity:1; transform:rotate(-2.5deg); }
+  .frame img { width:100%; height:100%; object-fit:cover; display:block; border-radius:3px; background:#e8c8d4; }
+
+  #lines { min-height:200px; }
+  #lines p {
+    font:italic 500 clamp(20px,5vw,28px)/1.5 'Playfair Display',serif; margin:0 0 14px;
+    opacity:0; transform:translateY(10px); transition:opacity 1.2s, transform 1.2s;
+  }
+  #lines p.on { opacity:1; transform:none; }
+  #lines p.big { color:var(--rose); font-size:clamp(26px,7vw,40px); margin-top:24px; }
+
+  #again { margin-top:30px; opacity:0; transition:opacity 1s; background:none; border:1px solid var(--gold); color:var(--gold);
+           border-radius:30px; padding:10px 24px; font:600 15px 'Nunito',sans-serif; cursor:pointer; }
+  #again.on { opacity:1; }
+  @media (prefers-reduced-motion:reduce) { * { transition-duration:.01s !important; animation:none !important; } }
+</style>
+</head>
+<body>
+
+<div id="start">
+  <h1>Rubaiya, you won ❤</h1>
+  <p>One more thing is waiting for you…</p>
+  <button id="go">Open your surprise</button>
+</div>
+
+<canvas id="fx"></canvas>
+
+<main>
+  <h2 id="title">Happy Birthday, Rubaiya</h2>
+  <div class="frame" id="frame"><img src="our-photo.png.jpeg" alt="Us" onerror="this.removeAttribute('src')"></div>
+  <div id="lines"></div>
+  <button id="again">Play again</button>
+</main>
+
+<audio id="music" src="birthday.mp3" loop preload="auto"></audio>
+
+<script>
+/* ============ EDIT HERE ============ */
+const PHOTO = 'our-photo.png.jpeg';     // put your photo next to this file
+const MUSIC = 'birthday.mp3';       // put your song next to this file
+const LINES = [
+  "Today is not an ordinary day.",
+  "Some days pass quietly, leaving nothing but memories.",
+  "But some days change the world in ways words can never explain.",
+  "Today is the day the world became a little more beautiful.",
+  "Because today, Rubaiya, the universe gave us you.",
+
+  "If life were a game, I think you would be Top level to achive",
+  "Not because it is easy, but because every moment is worth playing.",
+  "I built a whole game, with obstacles, enemies, and difficult bosses.",
+  "But somewhere along the way, I realized something.",
+  "The real prize was never at the end of the game.",
+  "The real winning prize is YOU",
+  "Surviving all the obstacles is for getting YOU",
+
+  "You know, the world can be a difficult place.",
+  "Some days feel like endless battles with no save points.",
+  "Some nights are darker than any game could ever be.",
+  "But somehow, a single smile from you can make everything feel lighter.",
+  "And your laughter makes even the hardest levels worth surviving.",
+
+  "If I could give you one thing in this world,",
+  "I would give you the ability to see yourself through my eyes.",
+  "Then you would understand how special you truly are.",
+  "You would see the beauty you sometimes overlook.",
+  "You would see the light you bring without even trying.",
+  "And you would finally understand why your existence matters so much to me.",
+
+  "Thank you for every smile, every laugh, every patient moment.",
+  "Thank you for the little things you probably don't even remember.",
+  "For the conversations that made ordinary nights unforgettable.",
+  "For the moments that became memories without us even noticing.",
+  "And for being someone who makes this world feel a little less lonely.",
+
+  "I cannot promise you a life without sadness.",
+  "I cannot promise that every level will be easy.",
+  "But I hope you always find reasons to smile.",
+  "I hope your dreams find their way into reality.",
+  "I hope life is gentle with your heart.",
+  "And whenever the world feels too heavy,",
+  "I hope you remember that you never have to be perfect to be loved.",
+
+  "Another year older, another chapter written.",
+  "Another collection of sunsets, dreams, and beautiful little moments awaits you.",
+  "And if life is a story, I hope your next chapters are your happiest ones.",
+  "May you find magic in ordinary mornings.",
+  "May you find courage on your darkest nights.",
+  "And may you always have something beautiful to look forward to.",
+
+  "If I could pause time, I would save a thousand little moments with you.",
+  "If I could rewrite the stars, I would still wish for your happiness.",
+  "And if I could choose one thing to keep from this ever-changing world,",
+  "I would choose the memories that make me smile because of you.",
+
+  "So, Rubaiya, this little game is more than lines of code.",
+  "Every obstacle, every level, every little detail was made with you in mind.",
+  "Maybe it isn't the biggest gift in the world.",
+  "But it carries something no amount of money could ever buy:",
+  "my time, my thoughts, and a little piece of my heart.",
+
+  "Today, the main character is you.",
+  "The world is your adventure.",
+  "Your dreams are the destination.",
+  "And I hope happiness follows you through every level.",
+
+  "Happy Birthday, Rubaiya. 🎂",
+  "May this new chapter be kinder, brighter, and more beautiful than the last.",
+  "May you always find a reason to believe in magic.",
+  "And may you never forget how wonderfully rare you are.",
+
+  "One last thing before you leave this little world...",
+  "Out of all the things I could have created,",
+  "I'm glad I created something just to make you smile.",
+
+  "Because the game will eventually end.",
+  "The screen will go dark.",
+  "The music will fade.",
+  "But the feeling behind these words will remain.",
+
+  "You were never just the reason for this game.",
+  "You were the reason it was worth making.",
+
+  "Happy Birthday, Rubaiya.",
+  "I love you. ❤"
+];
+const BIG_LINES = [6, 7];           // indexes of lines shown larger in pink
+const SECONDS_PER_LINE = 3.2;
+/* =================================== */
+
+const $ = id => document.getElementById(id);
+$('music').src = MUSIC;
+$('frame').querySelector('img').src = PHOTO;
+
+/* floating hearts + confetti */
+const cv = $('fx'), c = cv.getContext('2d');
+let W, H, bits = [];
+function size() { W = cv.width = innerWidth; H = cv.height = innerHeight; }
+addEventListener('resize', size); size();
+function addHeart() {
+  bits.push({ k:'h', x:Math.random()*W, y:H+20, s:10+Math.random()*22, v:30+Math.random()*50, p:Math.random()*6, a:0.15+Math.random()*0.35 });
+}
+function confetti(n) {
+  const cols = ['#ff7aa8','#ffd9a0','#fff4f0','#ffb3cf','#f5c542'];
+  for (let i=0;i<n;i++) bits.push({ k:'c', x:W/2, y:H*0.35, vx:(Math.random()-.5)*900, vy:-Math.random()*700-100, s:6+Math.random()*6, col:cols[i%cols.length], life:3+Math.random()*2 });
+}
+function heart(x,y,s) {
+  c.beginPath(); c.moveTo(x, y + s*0.3);
+  c.bezierCurveTo(x, y - s*0.3, x - s, y - s*0.3, x - s, y + s*0.3);
+  c.bezierCurveTo(x - s, y + s*0.8, x, y + s*1.0, x, y + s*1.3);
+  c.bezierCurveTo(x, y + s*1.0, x + s, y + s*0.8, x + s, y + s*0.3);
+  c.bezierCurveTo(x + s, y - s*0.3, x, y - s*0.3, x, y + s*0.3);
+  c.fill();
+}
+let t0 = performance.now(), hearts = false;
+function tick(now) {
+  const dt = Math.min(0.05, (now - t0)/1000); t0 = now;
+  c.clearRect(0,0,W,H);
+  if (hearts && Math.random() < 0.12) addHeart();
+  for (let i = bits.length-1; i>=0; i--) {
+    const b = bits[i];
+    if (b.k === 'h') {
+      b.y -= b.v*dt; b.x += Math.sin(now/900 + b.p)*0.4;
+      c.fillStyle = 'rgba(255,122,168,' + b.a + ')'; heart(b.x, b.y, b.s/2);
+      if (b.y < -40) bits.splice(i,1);
+    } else {
+      b.vy += 900*dt; b.x += b.vx*dt; b.y += b.vy*dt; b.life -= dt;
+      c.fillStyle = b.col; c.fillRect(b.x, b.y, b.s, b.s*0.6);
+      if (b.life <= 0) bits.splice(i,1);
+    }
+  }
+  requestAnimationFrame(tick);
+}
+requestAnimationFrame(tick);
+
+/* the show */
+let timers = [];
+function later(fn, s) { timers.push(setTimeout(fn, s*1000)); }
+function play() {
+  timers.forEach(clearTimeout); timers = [];
+  $('lines').innerHTML = ''; $('again').classList.remove('on');
+  $('title').classList.remove('on'); $('frame').classList.remove('on');
+  hearts = true;
+  later(() => $('title').classList.add('on'), 0.5);
+  later(() => $('frame').classList.add('on'), 2.5);
+  LINES.forEach((txt, i) => {
+    later(() => {
+      const p = document.createElement('p');
+      p.textContent = txt; if (BIG_LINES.includes(i)) p.className = 'big';
+      $('lines').appendChild(p);
+      requestAnimationFrame(() => p.classList.add('on'));
+      p.scrollIntoView({ behavior:'smooth', block:'center' });
+      if (i === BIG_LINES[0]) confetti(160);
+      if (i === LINES.length - 1) { confetti(120); later(() => $('again').classList.add('on'), 2); }
+    }, 5 + i * SECONDS_PER_LINE);
+  });
+}
+$('go').addEventListener('click', () => {
+  $('music').volume = 0.7;
+  $('music').play().catch(() => {});
+  $('start').style.opacity = 0;
+  setTimeout(() => $('start').remove(), 900);
+  play();
+});
+$('again').addEventListener('click', () => { $('music').currentTime = 0; window.scrollTo(0,0); play(); });
+</script>
+</body>
+</html>
